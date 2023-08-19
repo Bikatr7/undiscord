@@ -44,7 +44,7 @@ class UndiscordCore {
     offset: 0,
     iterations: 0,
 
-    _seachResponse: null,
+    _searchResponse: null,
     _messagesToDelete: [],
     _skippedMessages: [],
   };
@@ -72,7 +72,7 @@ class UndiscordCore {
       offset: 0,
       iterations: 0,
 
-      _seachResponse: null,
+      _searchResponse: null,
       _messagesToDelete: [],
       _skippedMessages: [],
     };
@@ -84,7 +84,7 @@ class UndiscordCore {
   async runBatch(queue) {
     if (this.state.running) return log.error('Already running!');
 
-    log.info(`Runnning batch with queue of ${queue.length} jobs`);
+    log.info(`Running batch with queue of ${queue.length} jobs`);
     for (let i = 0; i < queue.length; i++) {
       const job = queue[i];
       log.info('Starting job...', `(${i + 1}/${queue.length})`);
@@ -140,7 +140,7 @@ class UndiscordCore {
 
       log.verb(
         `Grand total: ${this.state.grandTotal}`,
-        `(Messages in current page: ${this.state._seachResponse.messages.length}`,
+        `(Messages in current page: ${this.state._searchResponse.messages.length}`,
         `To be deleted: ${this.state._messagesToDelete.length}`,
         `Skipped: ${this.state._skippedMessages.length})`,
         `offset: ${this.state.offset}`
@@ -156,7 +156,7 @@ class UndiscordCore {
 
         if (await this.confirm() === false) {
           this.state.running = false; // break out of a job
-          break; // immmediately stop this iteration
+          break; // immediately stop this iteration
         }
 
         await this.deleteMessagesFromList();
@@ -167,13 +167,11 @@ class UndiscordCore {
         const oldOffset = this.state.offset;
         this.state.offset += this.state._skippedMessages.length;
         log.verb('There\'s nothing we can delete on this page, checking next page...');
-        log.verb(`Skipped ${this.state._skippedMessages.length} out of ${this.state._seachResponse.messages.length} in this page.`, `(Offset was ${oldOffset}, ajusted to ${this.state.offset})`);
+        log.verb(`Skipped ${this.state._skippedMessages.length} out of ${this.state._searchResponse.messages.length} in this page.`, `(Offset was ${oldOffset}, adjusted to ${this.state.offset})`);
       }
-      else {
-        log.verb('Ended because API returned an empty page.');
-        log.verb('[End state]', this.state);
-        if (isJob) break; // break without stopping if this is part of a job
-        this.state.running = false;
+      // bandaid fix for the API returning an empty page, Likely caused by indexing issues.
+      else{
+        log.verb('Skipping because API returned an empty page.');
       }
 
       // wait before next page (fix search page not updating fast enough)
@@ -200,7 +198,7 @@ class UndiscordCore {
     this.stats.etr = (this.options.searchDelay * Math.round(this.state.grandTotal / 25)) + ((this.options.deleteDelay + this.stats.avgPing) * this.state.grandTotal);
   }
 
-  /** As for confirmation in the beggining process */
+  /** As for confirmation in the beginning process */
   async confirm() {
     if (!this.options.askForConfirmation) return true;
 
@@ -276,7 +274,7 @@ class UndiscordCore {
 
         this.stats.throttledCount++;
         this.stats.throttledTotalTime += w;
-        this.stats.searchDelay += w; // increase delay
+        this.stats.searchDelay += this.stats.searchDelay + w; // increase delay, fixes incorrect ratelimit calculation.
         w = this.stats.searchDelay;
         log.warn(`Being rate limited by the API for ${w}ms! Increasing search delay...`);
         this.printStats();
@@ -292,13 +290,13 @@ class UndiscordCore {
       }
     }
     const data = await resp.json();
-    this.state._seachResponse = data;
+    this.state._searchResponse = data;
     console.log(PREFIX, 'search', data);
     return data;
   }
 
   async filterResponse() {
-    const data = this.state._seachResponse;
+    const data = this.state._searchResponse;
 
     // the search total will decrease as we delete stuff
     const total = data.total_results;
@@ -309,7 +307,9 @@ class UndiscordCore {
 
     // we can only delete some types of messages, system messages are not deletable.
     let messagesToDelete = discoveredMessages;
-    messagesToDelete = messagesToDelete.filter(msg => msg.type === 0 || (msg.type >= 6 && msg.type <= 21));
+
+    // correction for excluding Non-Ethereal slash commands (TYPE 20)
+    messagesToDelete = messagesToDelete.filter(msg => msg.type === 0 || (msg.type >= 6 && msg.type <= 19) || msg.type === 21);
     messagesToDelete = messagesToDelete.filter(msg => msg.pinned ? this.options.includePinned : true);
 
     // custom filter of messages
@@ -378,7 +378,7 @@ class UndiscordCore {
       this.afterRequest();
     } catch (err) {
       // no response error (e.g. network error)
-      log.error('Delete request throwed an error:', err);
+      log.error('Delete request threw an error:', err);
       log.verb('Related object:', redact(JSON.stringify(message)));
       this.state.failCount++;
       return 'FAILED';
