@@ -111,10 +111,10 @@ class UndiscordCore {
   /** Start the deletion process */
   async run(isJob = false) {
     if (this.state.running && !isJob) return log.error('Already running!');
-
+  
     this.state.running = true;
     this.stats.startTime = new Date();
-
+  
     log.success(`\nStarted at ${this.stats.startTime.toLocaleString()}`);
     log.debug(
       `authorId = "${redact(this.options.authorId)}"`,
@@ -125,68 +125,69 @@ class UndiscordCore {
       `hasLink = ${!!this.options.hasLink}`,
       `hasFile = ${!!this.options.hasFile}`,
     );
-
+  
     if (this.onStart) this.onStart(this.state, this.stats);
-
+  
     do {
       this.state.iterations++;
-
+  
       log.verb('Fetching messages...');
       // Search messages
       await this.search();
-
-      // Process results and find which messages should be deleted
-      await this.filterResponse();
-
-      log.verb(
-        `Grand total: ${this.state.grandTotal}`,
-        `(Messages in current page: ${this.state._searchResponse.messages.length}`,
-        `To be deleted: ${this.state._messagesToDelete.length}`,
-        `Skipped: ${this.state._skippedMessages.length})`,
-        `offset: ${this.state.offset}`
-      );
-      this.printStats();
-
-      // Calculate estimated time
-      this.calcEtr();
-      log.verb(`Estimated time remaining: ${msToHMS(this.stats.etr)}`);
-
-      // if there are messages to delete, delete them
-      if (this.state._messagesToDelete.length > 0) {
-
-        if (await this.confirm() === false) {
-          this.state.running = false; // break out of a job
-          break; // immediately stop this iteration
-        }
-
-        await this.deleteMessagesFromList();
-      }
-      else if (this.state._skippedMessages.length > 0) {
-        // There are stuff, but nothing to delete (example a page full of system messages)
-        // check next page until we see a page with nothing in it (end of results).
-        const oldOffset = this.state.offset;
-        this.state.offset += this.state._skippedMessages.length;
-        log.verb('There\'s nothing we can delete on this page, checking next page...');
-        log.verb(`Skipped ${this.state._skippedMessages.length} out of ${this.state._searchResponse.messages.length} in this page.`, `(Offset was ${oldOffset}, adjusted to ${this.state.offset})`);
-      }
-      // bandaid fix for the API returning an empty page, Likely caused by indexing issues.
-      else{
+  
+      // Check for an empty page and adjust the offset
+      if (this.state._searchResponse.messages.length === 0) {
         log.verb('Skipping because API returned an empty page.');
+      } else {
+        // Process results and find which messages should be deleted
+        await this.filterResponse();
+  
+        log.verb(
+          `Grand total: ${this.state.grandTotal}`,
+          `(Messages in current page: ${this.state._searchResponse.messages.length}`,
+          `To be deleted: ${this.state._messagesToDelete.length}`,
+          `Skipped: ${this.state._skippedMessages.length})`,
+          `offset: ${this.state.offset}`
+        );
+        this.printStats();
+  
+        // Calculate estimated time
+        this.calcEtr();
+        log.verb(`Estimated time remaining: ${msToHMS(this.stats.etr)}`);
+  
+        // if there are messages to delete, delete them
+        if (this.state._messagesToDelete.length > 0) {
+  
+          if (await this.confirm() === false) {
+            this.state.running = false; // break out of a job
+            break; // immediately stop this iteration
+          }
+  
+          await this.deleteMessagesFromList();
+        } else if (this.state._skippedMessages.length > 0) {
+          // There are stuff, but nothing to delete (example a page full of system messages)
+          // check the next page until we see a page with nothing in it (end of results).
+          const oldOffset = this.state.offset;
+          this.state.offset += this.state._skippedMessages.length;
+          log.verb('There\'s nothing we can delete on this page, checking the next page...');
+          log.verb(`Skipped ${this.state._skippedMessages.length} out of ${this.state._searchResponse.messages.length} in this page.`, `(Offset was ${oldOffset}, adjusted to ${this.state.offset})`);
+        }
       }
-
-      // wait before next page (fix search page not updating fast enough)
-      log.verb(`Waiting ${(this.options.searchDelay / 1000).toFixed(2)}s before next page...`);
+  
+      // wait before the next page (fix search page not updating fast enough)
+      log.verb(`Waiting ${(this.options.searchDelay / 1000).toFixed(2)}s before the next page...`);
       await wait(this.options.searchDelay);
-
+  
     } while (this.state.running);
-
+  
     this.stats.endTime = new Date();
     log.success(`Ended at ${this.stats.endTime.toLocaleString()}! Total time: ${msToHMS(this.stats.endTime.getTime() - this.stats.startTime.getTime())}`);
     this.printStats();
     log.debug(`Deleted ${this.state.delCount} messages, ${this.state.failCount} failed.\n`);
-
+  
     if (this.onStop) this.onStop(this.state, this.stats);
   }
+  
 
   stop() {
     this.state.running = false;
